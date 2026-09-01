@@ -196,7 +196,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
 
       if (configKeys) LLMKeyPool.register(input.id, configKeys)
       else if (authed) LLMKeyPool.register(input.id, ["oauth-managed"])
-      else LLMKeyPool.clear(input.id)
+      else LLMKeyPool.register(input.id, ["public"])
 
       const ok = hasKey || authed || Boolean(configKeys)
 

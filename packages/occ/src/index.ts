@@ -28,19 +28,19 @@ import { Heap } from "./cli/heap"
 
 const args = hideBin(process.argv)
 
-// occ fork: set the process / terminal title to "occ" early.
+// occ fork: set the process / terminal title to "Occ" early.
 // - process.title: updates the process name visible in Task Manager / ps
 // - OSC 0 escape: updates the terminal window/tab title in xterm-compatible terminals
 // All best-effort and no-op safe on platforms that don't support them.
 try {
-  process.title = "occ"
+  process.title = "Occ"
 } catch {
   // ignore on platforms where process.title is read-only
 }
 if (process.stdout.isTTY) {
   // Emit the OSC escape multiple times in case the terminal is buffering.
   for (let i = 0; i < 3; i++) {
-    process.stdout.write("\x1b]0;occ\x07")
+    process.stdout.write("\x1b]0;Occ\x07")
   }
 }
 

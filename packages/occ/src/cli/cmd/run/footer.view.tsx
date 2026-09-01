@@ -55,6 +55,7 @@ import type {
 } from "./types"
 import type { RunTheme } from "./theme"
 import { modelInfo } from "./variant.shared"
+import { LLMKeyPool } from "@/session/llm/key-pool"
 
 registerOpencodeSpinner()
 
@@ -383,12 +384,38 @@ export function RunFooterView(props: RunFooterViewProps) {
   const shell = createMemo(() => prompt() && composer.shell())
   const menu = createMemo(() => prompt() && composer.visible())
   const stateStatus = createMemo(() => props.state().status.trim())
+  const [planMode, setPlanMode] = createSignal(false)
   const modeLabel = createMemo(() => {
     if (exiting()) {
       return "EXIT"
     }
-
-    return shell() ? "SHELL" : "BUILD"
+    if (shell()) return "SHELL"
+    return planMode() ? "PLAN" : "BUILD"
+  })
+  const [rotateTick, setRotateTick] = createSignal(0)
+  createEffect(() => {
+    const id = setInterval(() => setRotateTick((v) => v + 1), 600)
+    onCleanup(() => clearInterval(id))
+  })
+  // Expose model picker opener for /model slash command
+  createEffect(() => {
+    const open = () => setRoute({ type: "model" } as any)
+    try {
+      ;(globalThis as any).__occ_openModel = open
+      window.addEventListener("occ:open-model", open)
+      onCleanup(() => {
+        window.removeEventListener("occ:open-model", open)
+        if ((globalThis as any).__occ_openModel === open) delete (globalThis as any).__occ_openModel
+      })
+    } catch {}
+  })
+  const rotateLabel = createMemo(() => {
+    void rotateTick()
+    const pool = LLMKeyPool.get("opencode")
+    if (!pool || pool.keys.length === 0) return ""
+    // Show R(n) where n is 1-based key index; always visible when rotation is configured
+    const idx = pool.keys.length === 1 ? 0 : (pool.cursor - 1 + pool.keys.length) % pool.keys.length
+    return `R(${idx + 1})`
   })
   const modeColor = createMemo(() => {
     if (exiting()) {
@@ -497,9 +524,11 @@ export function RunFooterView(props: RunFooterViewProps) {
     props.onRequestExit?.(undefined)
   })
 
+  // Tab toggles Build <-> Plan — intercept before prompt textarea
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
     enabled: active().type === "prompt" && route().type === "composer" && !composer.visible(),
+    priority: 10,
     commands: [
       {
         name: "command.palette.show",
@@ -513,10 +542,17 @@ export function RunFooterView(props: RunFooterViewProps) {
         category: "Model",
         run: props.onCycle,
       },
+      {
+        name: "agent.cycle",
+        title: "Toggle Build/Plan",
+        category: "Agent",
+        run: () => setPlanMode((v) => !v),
+      },
     ],
     bindings: [
       ...props.tuiConfig.keybinds.get("command.palette.show"),
       ...props.tuiConfig.keybinds.get("variant.cycle"),
+      { key: "tab", desc: "Toggle Build/Plan", group: "Agent" } as any,
     ],
   }))
 
@@ -826,6 +862,9 @@ export function RunFooterView(props: RunFooterViewProps) {
                 <box paddingLeft={1} paddingRight={1} backgroundColor={theme().statusAccent} flexShrink={0}>
                   <text wrapMode="none" truncate>
                     <span style={{ fg: modeColor(), bold: true }}>{modeLabel()}</span>
+                    <Show when={rotateLabel()}>
+                      {(r) => <span style={{ fg: theme().muted }}> {r()}</span>}
+                    </Show>
                   </text>
                 </box>
 

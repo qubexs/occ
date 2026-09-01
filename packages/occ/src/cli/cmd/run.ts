@@ -294,23 +294,28 @@ export const RunCommand = effectCmd({
               : fs.existsSync(path.join(globalHome, ".config", "opencode", "config.json"))
                 ? path.join("~/.config/opencode/config.json")
                 : undefined
-        UI.empty()
-        UI.println(`${UI.Style.TEXT_DIM}occ config:${UI.Style.TEXT_NORMAL}`)
-        UI.println(`  global:  ${globalFile ?? "none"}`)
-        UI.println(`  project: ${projectFile ?? "none"}`)
-        try {
-          if (projectFile) {
-            const raw = fs.readFileSync(path.resolve(projectFile), "utf8")
-            const parsed = JSON.parse(raw) as { provider?: Record<string, { options?: { apiKey?: unknown } }> }
-            const key = parsed.provider?.opencode?.options?.apiKey
-            const keys = Array.isArray(key) ? key : key ? [key] : []
-            if (keys.length > 0) {
-              const masked = keys.map((k) => `${String(k).slice(0, 9)}…${String(k).slice(-4)}`)
-              UI.println(`  keys:    opencode=${keys.length} (${masked.join(", ")})`)
+        // Only show config banner when not in mini (TUI) mode and when a config actually exists
+        const isMini = Boolean((args as any).mini)
+        const shouldShowBanner = !isMini && (globalFile || projectFile)
+        if (shouldShowBanner) {
+          UI.empty()
+          UI.println(`${UI.Style.TEXT_DIM}occ config:${UI.Style.TEXT_NORMAL}`)
+          UI.println(`  global:  ${globalFile ?? "none"}`)
+          UI.println(`  project: ${projectFile ?? "none"}`)
+          try {
+            if (projectFile) {
+              const raw = fs.readFileSync(path.resolve(projectFile), "utf8")
+              const parsed = JSON.parse(raw) as { provider?: Record<string, { options?: { apiKey?: unknown } }> }
+              const key = parsed.provider?.opencode?.options?.apiKey
+              const keys = Array.isArray(key) ? key : key ? [key] : []
+              if (keys.length > 0) {
+                const masked = keys.map((k) => `${String(k).slice(0, 9)}…${String(k).slice(-4)}`)
+                UI.println(`  keys:    opencode=${keys.length} (${masked.join(", ")})`)
+              }
             }
-          }
-        } catch {}
-        UI.empty()
+          } catch {}
+          UI.empty()
+        }
       } catch {
         // best-effort; never block startup on banner failure
       }

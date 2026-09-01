@@ -52,6 +52,11 @@ export function isNewCommand(input: string): boolean {
   return input.trim().toLowerCase() === "/new"
 }
 
+export function isModelCommand(input: string): boolean {
+  const t = input.trim().toLowerCase()
+  return t === "/model" || t === "/models" || t.startsWith("/model ") || t.startsWith("/models ")
+}
+
 export function createPromptHistory(items?: RunPrompt[]): PromptHistoryState {
   const list = (items ?? []).filter((item) => item.text.trim().length > 0).map(promptCopy)
   const next: RunPrompt[] = []

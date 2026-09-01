@@ -134,7 +134,7 @@ const targets = singleFlag
     })
   : allTargets
 
-  await $`rm -rf dist_new7`
+  await $`rm -rf dist_new8`
 
 const binaries: Record<string, string> = {}
 if (!skipInstall) {
@@ -154,7 +154,7 @@ for (const item of targets) {
     .filter(Boolean)
     .join("-")
   console.log(`building ${name}`)
-  await $`mkdir -p dist_new7/${name}/bin`
+  await $`mkdir -p dist_new8/${name}/bin`
 
   const workerPath = "./src/cli/tui/worker.ts"
   const treeSitterWorkerPath = "opentui-tree-sitter-worker.js"
@@ -175,15 +175,15 @@ for (const item of targets) {
       autoloadTsconfig: true,
       autoloadPackageJson: true,
       target: name.replace(pkg.name, "bun") as any,
-      outfile: `dist_new7/${name}/bin/occ`,
+      outfile: `dist_new8/${name}/bin/occ`,
       execArgv: [`--user-agent=occ/${Script.version}`, "--use-system-ca", "--"],
       windows: {
-        // occ fork: rename the binary so it shows up as "occ" in Task Manager / Process Explorer
+        // occ fork: rename the binary so it shows up as "Occ" in Task Manager / Process Explorer
         // instead of inheriting bun's "OpenCode" title.
-        title: "occ",
-        publisher: "occ",
+        title: "Occ",
+        publisher: "Occ",
         version: "0.1.0",
-        description: "occ — CLI-only fork of opencode",
+        description: "Occ",
         copyright: "MIT",
       },
     },
@@ -211,7 +211,7 @@ for (const item of targets) {
 
   // Smoke test: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
-    const binaryPath = `dist_new7/${name}/bin/occ`
+    const binaryPath = `dist_new8/${name}/bin/occ`
     console.log(`Running smoke test: ${binaryPath} --version`)
     try {
       const versionOutput = await $`${binaryPath} --version`.text()
@@ -222,8 +222,8 @@ for (const item of targets) {
     }
   }
 
-  await $`rm -rf ./dist_new7/${name}/bin/tui`
-  await Bun.file(`dist_new7/${name}/package.json`).write(
+  await $`rm -rf ./dist_new8/${name}/bin/tui`
+  await Bun.file(`dist_new8/${name}/package.json`).write(
     JSON.stringify(
       {
         name,

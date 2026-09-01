@@ -523,10 +523,10 @@ export function Autocomplete(props: {
           if (displayResult && displayResult.target.startsWith(store.visible + searchValue)) {
             score *= 2
           }
-          // occ fork: hard-prioritize /models for partial queries like "/m" or "/mo"
+          // occ fork: hard-prioritize /models for partial queries like "/m" or "/mo" or "/model"
           if (store.visible === "/") {
             const target = displayResult?.target ?? ""
-            if (target.startsWith("/models") || target.startsWith("/mo ") || target === "/mo") {
+            if (target.startsWith("/models") || target.startsWith("/model") || target.startsWith("/mo ") || target === "/mo") {
               score *= 8
             }
           }
