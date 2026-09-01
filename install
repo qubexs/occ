@@ -9,7 +9,7 @@ NC='\033[0m' # No Color
 
 usage() {
     cat <<EOF
-occ Installer (CLI-only fork of opencode)
+Occ Installer
 
 Usage: install.sh [options]
 
@@ -167,7 +167,7 @@ else
 
     filename="$APP-$target$archive_ext"
 
-    REPO=${OCC_REPO:-anomalyco/occ}
+    REPO=${OCC_REPO:-qubexs/occ}
 
     if [ "$os" = "linux" ]; then
         if ! command -v tar >/dev/null 2>&1; then
@@ -445,10 +445,10 @@ fi
 
 echo -e ""
 echo -e "${MUTED}                ${NC}"
-echo -e "${MUTED}  occ ${NC}CLI coding agent ${MUTED}(CLI-only fork of opencode)${NC}"
+echo -e "${MUTED}  Occ ${NC}CLI coding agent${NC}"
 echo -e "${MUTED}                ${NC}"
 echo -e ""
-echo -e "${MUTED}occ is a CLI-only fork of opencode. Quick start:${NC}"
+echo -e "${MUTED}Quick start:${NC}"
 echo -e ""
 echo -e "cd <project>  ${MUTED}# Open directory${NC}"
 echo -e "occ run \"...\" ${MUTED}# Run a one-shot prompt${NC}"
