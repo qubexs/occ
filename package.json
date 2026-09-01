@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "occ",
+  "description": "CLI-only fork of opencode",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "dev": "bun run --cwd packages/occ --conditions=browser src/index.ts",
+    "lint": "oxlint",
+    "typecheck": "bun run --cwd packages/occ typecheck",
+    "test": "echo 'run tests from packages/occ' && exit 1",
+    "build": "bun run --cwd packages/occ build --single --skip-embed-web-ui"
+  },
+  "workspaces": {
+    "packages": [
+      "packages/codemode",
+      "packages/core",
+      "packages/effect-drizzle-sqlite",
+      "packages/effect-sqlite-node",
+      "packages/http-recorder",
+      "packages/llm",
+      "packages/occ",
+      "packages/plugin",
+      "packages/protocol",
+      "packages/schema",
+      "packages/script",
+      "packages/sdk/js",
+      "packages/server",
+      "packages/tui"
+    ],
+    "catalog": {
+      "@effect/opentelemetry": "4.0.0-beta.83",
+      "@effect/platform-node": "4.0.0-beta.83",
+      "@effect/sql-sqlite-bun": "4.0.0-beta.83",
+      "@types/bun": "1.3.13",
+      "@types/cross-spawn": "6.0.6",
+      "@octokit/rest": "22.0.0",
+      "@opentui/core": "0.4.5",
+      "@opentui/keymap": "0.4.5",
+      "@opentui/solid": "0.4.5",
+      "@shikijs/stream": "4.2.0",
+      "ulid": "3.0.1",
+      "@types/node": "24.12.2",
+      "@tsconfig/bun": "1.0.9",
+      "@tsconfig/node22": "22.0.2",
+      "@types/semver": "7.7.1",
+      "@openauthjs/openauth": "0.0.0-20250322224806",
+      "@pierre/diffs": "1.2.10",
+      "opentui-spinner": "0.0.7",
+      "diff": "8.0.2",
+      "drizzle-kit": "1.0.0-rc.2",
+      "drizzle-orm": "1.0.0-rc.2",
+      "effect": "4.0.0-beta.83",
+      "ai": "6.0.168",
+      "cross-spawn": "7.0.6",
+      "fuzzysort": "3.1.0",
+      "semver": "7.7.4",
+      "typescript": "5.8.2",
+      "@typescript/native-preview": "7.0.0-dev.20251207.1",
+      "zod": "4.1.8",
+      "remeda": "2.26.0",
+      "solid-js": "1.9.10",
+      "@lydell/node-pty": "1.2.0-beta.12"
+    }
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "catalog:",
+    "@types/mime-types": "3.0.1",
+    "@typescript/native-preview": "catalog:",
+    "oxlint": "1.60.0",
+    "oxlint-tsgolint": "0.21.0",
+    "prettier": "3.6.2",
+    "semver": "^7.6.0",
+    "typescript": "catalog:"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anomalyco/occ"
+  },
+  "license": "MIT",
+  "prettier": {
+    "semi": false,
+    "printWidth": 120
+  },
+  "trustedDependencies": [
+    "esbuild",
+    "node-pty",
+    "protobufjs",
+    "tree-sitter",
+    "tree-sitter-bash",
+    "tree-sitter-powershell",
+    "web-tree-sitter"
+  ],
+  "overrides": {
+    "@opentui/core": "catalog:",
+    "@opentui/keymap": "catalog:",
+    "@opentui/solid": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  // occ config — edit and add your real opencode-zen API keys
+  // Get free keys at https://opencode.ai/auth
+  "$schema": "./node_modules/@opencode-ai/sdk/v2/config.schema.json",
+  "model": "opencode/big-pickle",
+  "provider": {
+    "opencode": {
+      "options": {
+        "apiKey": [
+          "sk-oc-REPLACE-ME-1"
+        ]
+      }
+    }
+  }
+}
