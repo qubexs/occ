@@ -184,15 +184,21 @@ for (const item of targets) {
       target: name.replace(pkg.name, "bun") as any,
       outfile: `dist_new8/${name}/bin/occ`,
       execArgv: [`--user-agent=occ/${Script.version}`, "--use-system-ca", "--"],
-      windows: {
-        // occ fork: rename the binary so it shows up as "Occ" in Task Manager / Process Explorer
-        // instead of inheriting bun's "OpenCode" title.
-        title: "Occ",
-        publisher: "Occ",
-        version: peVersion,
-        description: "Occ",
-        copyright: "MIT",
-      },
+      // Windows PE metadata only applies to windows targets — passing it
+      // for other targets fails cross-compiled builds (FailedToLoadExecutable).
+      ...(item.os === "win32"
+        ? {
+            windows: {
+              // occ fork: rename the binary so it shows up as "Occ" in Task Manager / Process Explorer
+              // instead of inheriting bun's "OpenCode" title.
+              title: "Occ",
+              publisher: "Occ",
+              version: peVersion,
+              description: "Occ",
+              copyright: "MIT",
+            },
+          }
+        : {}),
     },
     files: {
       [treeSitterWorkerPath]: treeSitterWorker,
