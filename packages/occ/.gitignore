@@ -1,6 +1,7 @@
 research
 dist
 dist-*
+dist_new8
 gen
 app.log
 script/build-*.ts

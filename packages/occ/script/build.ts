@@ -21,6 +21,13 @@ const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 const plugin = createSolidTransformPlugin()
+// Windows PE metadata requires strict numeric a.b.c.d — sanitize the
+// Script version (preview builds look like 0.0.0-main-...).
+const peVersion = (() => {
+  const parts = Script.version.match(/^\d+(\.\d+)*/)?.[0].split(".").map(Number) ?? []
+  while (parts.length < 4) parts.push(0)
+  return parts.slice(0, 4).join(".")
+})()
 const skipEmbedWebUi = process.argv.includes("--skip-embed-web-ui")
 
 const createEmbeddedWebUIBundle = async () => {
@@ -182,7 +189,7 @@ for (const item of targets) {
         // instead of inheriting bun's "OpenCode" title.
         title: "Occ",
         publisher: "Occ",
-        version: "0.1.0",
+        version: peVersion,
         description: "Occ",
         copyright: "MIT",
       },
@@ -241,14 +248,26 @@ for (const item of targets) {
 }
 
 if (Script.release) {
+  // Tag for `gh release upload`. Script.version carries no leading "v".
+  const tag = `v${Script.version.replace(/^v/, "")}`
+  // --repo defaults to the current checkout (CI); GH_REPO overrides it.
+  const repo = process.env.GH_REPO?.trim()
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
-      await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist/${key}/bin`)
+      await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist_new8/${key}/bin`)
+    } else if (process.platform === "win32") {
+      // No zip.exe on Windows runners; bsdtar ships with Windows and
+      // picks the archive format from the extension with -a.
+      await $`tar -a -cf ../../${key}.zip *`.cwd(`dist_new8/${key}/bin`)
     } else {
-      await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
+      await $`zip -r ../../${key}.zip *`.cwd(`dist_new8/${key}/bin`)
     }
   }
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
+  if (repo) {
+    await $`gh release upload ${tag} ./dist_new8/*.zip ./dist_new8/*.tar.gz --clobber --repo ${repo}`
+  } else {
+    await $`gh release upload ${tag} ./dist_new8/*.zip ./dist_new8/*.tar.gz --clobber`
+  }
 }
 
 export { binaries }

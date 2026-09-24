@@ -1,0 +1,62 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  create:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+          else
+            gh release create "$TAG" --title "occ $TAG" --notes "occ $TAG"
+          fi
+
+  build:
+    needs: [create]
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            os: linux
+          - runner: ubuntu-24.04-arm
+            os: linux
+          - runner: macos-latest
+            os: darwin
+          - runner: windows-latest
+            os: windows
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Configure release version
+        run: |
+          echo "OPENCODE_RELEASE=1" >> "$GITHUB_ENV"
+          echo "OPENCODE_CHANNEL=latest" >> "$GITHUB_ENV"
+          echo "OPENCODE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        run: bun install
+      - name: Build all ${{ matrix.os }} targets and upload
+        # No --single: each runner builds every target for its own OS
+        # (sibling arch via bun cross-compile) and build.ts uploads each
+        # archive to the release when OPENCODE_RELEASE=1.
+        run: bun packages/occ/script/build.ts --skip-embed-web-ui
