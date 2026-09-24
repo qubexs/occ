@@ -20,6 +20,15 @@ const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
 const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
+// CI sharding: --os=<linux|darwin|windows|win32> and --arch=<x64|arm64>
+// restrict which allTargets entries get built so parallel release jobs
+// don't build (and re-upload) each other's archives.
+const onlyOs = (() => {
+  const raw = process.argv.find((a) => a.startsWith("--os="))?.slice("--os=".length).toLowerCase()
+  if (raw === "windows") return "win32"
+  return raw
+})()
+const onlyArch = process.argv.find((a) => a.startsWith("--arch="))?.slice("--arch=".length).toLowerCase()
 const plugin = createSolidTransformPlugin()
 // Windows PE metadata requires strict numeric a.b.c.d — sanitize the
 // Script version (preview builds look like 0.0.0-main-...).
@@ -120,26 +129,36 @@ const allTargets: {
   },
 ]
 
-const targets = singleFlag
-  ? allTargets.filter((item) => {
-      if (item.os !== process.platform || item.arch !== process.arch) {
-        return false
-      }
+const targets = allTargets.filter((item) => {
+  if (onlyOs !== undefined && item.os !== onlyOs) {
+    return false
+  }
 
-      // When building for the current platform, prefer a single native binary by default.
-      // Baseline binaries require additional Bun artifacts and can be flaky to download.
-      if (item.avx2 === false) {
-        return baselineFlag
-      }
+  if (onlyArch !== undefined && item.arch !== onlyArch) {
+    return false
+  }
 
-      // also skip abi-specific builds for the same reason
-      if (item.abi !== undefined) {
-        return false
-      }
+  if (!singleFlag) {
+    return true
+  }
 
-      return true
-    })
-  : allTargets
+  if (item.os !== process.platform || item.arch !== process.arch) {
+    return false
+  }
+
+  // When building for the current platform, prefer a single native binary by default.
+  // Baseline binaries require additional Bun artifacts and can be flaky to download.
+  if (item.avx2 === false) {
+    return baselineFlag
+  }
+
+  // also skip abi-specific builds for the same reason
+  if (item.abi !== undefined) {
+    return false
+  }
+
+  return true
+})
 
   await $`rm -rf dist_new8`
 

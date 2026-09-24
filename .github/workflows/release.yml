@@ -3,6 +3,8 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Manual dry run: builds without creating a release or uploading.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -13,6 +15,8 @@ defaults:
 
 jobs:
   create:
+    # Tags only: manual dispatches must not create a "main" release.
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -28,20 +32,23 @@ jobs:
           fi
 
   build:
+    # Tags only for the release object; manual runs still validate builds.
+    # (create is skipped on manual dispatch, so don't gate on its success.)
     needs: [create]
+    if: ${{ always() && (needs.create.result == 'success' || needs.create.result == 'skipped') }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - runner: ubuntu-latest
-            os: linux
+            flags: --os=linux --arch=x64
           - runner: ubuntu-24.04-arm
-            os: linux
+            flags: --os=linux --arch=arm64
           - runner: macos-latest
-            os: darwin
+            flags: --os=darwin
           - runner: windows-latest
-            os: windows
+            flags: --os=windows
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
@@ -53,15 +60,17 @@ jobs:
           bun-version: "1.4.2"
       - name: Configure release version
         run: |
-          echo "OPENCODE_RELEASE=1" >> "$GITHUB_ENV"
-          echo "OPENCODE_CHANNEL=latest" >> "$GITHUB_ENV"
-          echo "OPENCODE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          # Uploads only happen for tag pushes with an existing release.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "OPENCODE_RELEASE=1" >> "$GITHUB_ENV"
+            echo "OPENCODE_CHANNEL=latest" >> "$GITHUB_ENV"
+            echo "OPENCODE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          fi
       - name: Install dependencies
         run: bun install
-      - name: Build all ${{ matrix.os }} targets and upload
+      - name: Build ${{ matrix.flags }} targets and upload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # No --single: each runner builds every target for its own OS
-        # (sibling arch via bun cross-compile) and build.ts uploads each
-        # archive to the release when OPENCODE_RELEASE=1.
-        run: bun packages/occ/script/build.ts --skip-embed-web-ui
+        # Each job builds a disjoint target shard (no --single), so parallel
+        # jobs never build or re-upload each other's archives.
+        run: bun packages/occ/script/build.ts --skip-embed-web-ui ${{ matrix.flags }}
