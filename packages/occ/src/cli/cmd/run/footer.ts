@@ -92,6 +92,7 @@ type RunFooterOptions = {
   onCycleVariant?: () => CycleResult | void
   onModelSelect?: (model: NonNullable<RunInput["model"]>) => CycleResult | void | Promise<CycleResult | void>
   onVariantSelect?: (variant: string | undefined) => CycleResult | void | Promise<CycleResult | void>
+  onAgentSelect?: (agent: string) => void | Promise<void>
   onInterrupt?: () => void
   onBackground?: () => void
   onEditorOpen: (input: { value: string }) => Promise<string | undefined>
@@ -188,6 +189,8 @@ export class RunFooter implements FooterApi {
   private setProviders: Setter<RunProvider[] | undefined>
   private currentModel: Accessor<RunInput["model"]>
   private setCurrentModel: Setter<RunInput["model"]>
+  private currentAgent: Accessor<string>
+  private setCurrentAgent: Setter<string>
   private variants: Accessor<string[]>
   private setVariants: Setter<string[]>
   private currentVariant: Accessor<string | undefined>
@@ -267,6 +270,9 @@ export class RunFooter implements FooterApi {
     const [currentModel, setCurrentModel] = createSignal<RunInput["model"]>(options.model)
     this.currentModel = currentModel
     this.setCurrentModel = setCurrentModel
+    const [currentAgent, setCurrentAgent] = createSignal(options.agentLabel)
+    this.currentAgent = currentAgent
+    this.setCurrentAgent = setCurrentAgent
     const [variants, setVariants] = createSignal<string[]>([])
     this.variants = variants
     this.setVariants = setVariants
@@ -323,6 +329,7 @@ export class RunFooter implements FooterApi {
               backgroundSubagents: options.backgroundSubagents,
               history: options.history,
               agent: options.agentLabel,
+              onAgentSelect: footer.handleAgentSelect,
               onSubmit: footer.handlePrompt,
               onPermissionReply: footer.handlePermissionReply,
               onQuestionReply: footer.handleQuestionReply,
@@ -394,7 +401,7 @@ export class RunFooter implements FooterApi {
       this.flushing = this.flushing
         .then(() =>
           this.scrollback.writeTurnSummary({
-            agent: this.options.agentLabel,
+            agent: this.currentAgent(),
             model: current ? modelInfo(this.providers(), current).model : this.state().model,
             duration: next.duration,
           }),
@@ -814,6 +821,16 @@ export class RunFooter implements FooterApi {
 
     this.patch(patch)
     this.setNotice(result.status ?? "variant updated")
+  }
+
+  private handleAgentSelect = (agent: string): void => {
+    if (this.isClosed) {
+      return
+    }
+
+    const normalized = agent.trim().toLowerCase() || "build"
+    this.setCurrentAgent(normalized.charAt(0).toUpperCase() + normalized.slice(1))
+    void Promise.resolve(this.options.onAgentSelect?.(normalized)).catch(() => {})
   }
 
   private handleModelSelect = (model: NonNullable<RunInput["model"]>): void => {

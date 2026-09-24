@@ -239,6 +239,16 @@ function build(input: SplashWriterInput, kind: "entry" | "exit", ctx: Scrollback
       undefined,
       TextAttributes.BOLD,
     )
+    if (input.detail) {
+      push(
+        lines,
+        body_left,
+        top + 2,
+        Locale.truncateMiddle(input.detail, Math.max(1, width - body_left)),
+        left,
+        undefined,
+      )
+    }
     height = top + mark.length
   }
 

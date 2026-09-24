@@ -337,6 +337,11 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         variants: state.variants,
       }
     },
+    onAgentSelect: (agent) => {
+      const normalized = agent.trim().toLowerCase() || "build"
+      state.agent = normalized
+      log?.write("agent.select", { agent: normalized })
+    },
     onInterrupt: () => {
       if (!hasSession(input, state) || state.aborting) {
         return
@@ -634,6 +639,38 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
               } as const
               rememberLocal(commit)
               footer.append(commit)
+            }
+          }
+        : undefined,
+      onCompactSession: createSession
+        ? async () => {
+            const say = (kind: "system" | "error", text: string) => {
+              const commit = {
+                kind,
+                text,
+                phase: "final",
+                source: "system",
+              } as const
+              rememberLocal(commit)
+              footer.append(commit)
+            }
+            if (!state.sessionID) {
+              say("system", "no active session to compact")
+              return
+            }
+            if (!state.model) {
+              say("system", "select a model first (/model)")
+              return
+            }
+            try {
+              await ctx.sdk.session.summarize({
+                sessionID: state.sessionID,
+                providerID: state.model.providerID,
+                modelID: state.model.modelID,
+              })
+              say("system", "conversation compacted — context summarized, continue where you left off")
+            } catch (error) {
+              say("error", error instanceof Error ? error.message : String(error))
             }
           }
         : undefined,

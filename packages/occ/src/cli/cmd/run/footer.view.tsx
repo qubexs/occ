@@ -93,6 +93,7 @@ type RunFooterViewProps = {
   backgroundSubagents: boolean
   history?: RunPrompt[]
   agent: string
+  onAgentSelect?: (agent: string) => void
   onSubmit: (input: RunPrompt) => boolean
   onPermissionReply: (input: PermissionReply) => void | Promise<void>
   onQuestionReply: (input: QuestionReply) => void | Promise<void>
@@ -357,6 +358,44 @@ export function RunFooterView(props: RunFooterViewProps) {
 
     openTab(next.sessionID)
   }
+  // Primary agents available for Tab-cycling. Falls back to the built-in
+  // build/plan pair until the catalog loads (agents start as []).
+  const primaryAgents = createMemo(() => {
+    const list = (props.agents() ?? []).filter((item) => item.mode !== "subagent" && !item.hidden).map((item) => item.name)
+    return list.length > 0 ? list : ["build", "plan"]
+  })
+  const normalizeAgent = (value: string | undefined) => (value ?? "build").trim().toLowerCase() || "build"
+  const [currentAgent, setCurrentAgent] = createSignal(normalizeAgent(props.agent))
+  // Keep selection valid when the catalog loads or the initial agent arrives.
+  createEffect(() => {
+    const list = primaryAgents()
+    const current = normalizeAgent(currentAgent())
+    if (list.includes(current)) {
+      if (current !== currentAgent()) setCurrentAgent(current)
+      return
+    }
+    const initial = normalizeAgent(props.agent)
+    setCurrentAgent(list.includes(initial) ? initial : (list[0] ?? "build"))
+  })
+  let lastAgentCycleAt = 0
+  const cycleAgent = (dir: -1 | 1) => {
+    // Tab reaches us twice per press: the keymap's agent.cycle binding runs
+    // first (its binding doesn't preventDefault), then the prompt textarea's
+    // onKeyDown fires onAgentCycle again. Collapse same-tick repeats so one
+    // press cycles exactly once (with build+plan a double would be a no-op).
+    const now = Date.now()
+    if (now - lastAgentCycleAt < 250) return
+    lastAgentCycleAt = now
+    const list = primaryAgents()
+    if (list.length === 0) return
+    const base = list.indexOf(normalizeAgent(currentAgent()))
+    const from = base === -1 ? (dir === 1 ? -1 : 0) : base
+    const value = list[(from + dir + list.length) % list.length]
+    if (!value || value === currentAgent()) return
+    setCurrentAgent(value)
+    props.onAgentSelect?.(value)
+    props.onStatus(`agent ${value}`)
+  }
   const composer = createPromptState({
     directory: props.directory,
     findFiles: props.findFiles,
@@ -372,6 +411,7 @@ export function RunFooterView(props: RunFooterViewProps) {
     history: props.history,
     onSubmit: props.onSubmit,
     onCycle: props.onCycle,
+    onAgentCycle: cycleAgent,
     onInterrupt: props.onInterrupt,
     onEditorOpen: props.onEditorOpen,
     onInputClear: props.onInputClear,
@@ -384,13 +424,12 @@ export function RunFooterView(props: RunFooterViewProps) {
   const shell = createMemo(() => prompt() && composer.shell())
   const menu = createMemo(() => prompt() && composer.visible())
   const stateStatus = createMemo(() => props.state().status.trim())
-  const [planMode, setPlanMode] = createSignal(false)
   const modeLabel = createMemo(() => {
     if (exiting()) {
       return "EXIT"
     }
     if (shell()) return "SHELL"
-    return planMode() ? "PLAN" : "BUILD"
+    return normalizeAgent(currentAgent()).toUpperCase()
   })
   const [rotateTick, setRotateTick] = createSignal(0)
   createEffect(() => {
@@ -524,7 +563,8 @@ export function RunFooterView(props: RunFooterViewProps) {
     props.onRequestExit?.(undefined)
   })
 
-  // Tab toggles Build <-> Plan — intercept before prompt textarea
+  // Custom keybinds for agent cycling (Tab itself is intercepted in the
+  // prompt textarea's onKeyDown since the textarea consumes it first).
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
     enabled: active().type === "prompt" && route().type === "composer" && !composer.visible(),
@@ -544,15 +584,22 @@ export function RunFooterView(props: RunFooterViewProps) {
       },
       {
         name: "agent.cycle",
-        title: "Toggle Build/Plan",
+        title: "Next agent",
         category: "Agent",
-        run: () => setPlanMode((v) => !v),
+        run: () => cycleAgent(1),
+      },
+      {
+        name: "agent.cycle.reverse",
+        title: "Previous agent",
+        category: "Agent",
+        run: () => cycleAgent(-1),
       },
     ],
     bindings: [
       ...props.tuiConfig.keybinds.get("command.palette.show"),
       ...props.tuiConfig.keybinds.get("variant.cycle"),
-      { key: "tab", desc: "Toggle Build/Plan", group: "Agent" } as any,
+      ...props.tuiConfig.keybinds.get("agent.cycle"),
+      ...props.tuiConfig.keybinds.get("agent.cycle.reverse"),
     ],
   }))
 

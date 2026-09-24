@@ -17,6 +17,15 @@ import { mergeDeep } from "remeda"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
+// The opencode gateway free tier rejects clients below 1.18.0
+// ("OpenCode 1.18.0 or newer is required to use the free tier").
+// occ versions independently (0.x), so gateway-bound requests advertise
+// this protocol-compatibility floor instead of the fork version.
+// Bump only if the gateway raises its minimum. Users can still override
+// the header via provider/model options (merged below).
+const GATEWAY_COMPAT_VERSION = "1.18.0"
+const GATEWAY_USER_AGENT = `opencode/${GATEWAY_COMPAT_VERSION}`
+
 type PrepareInput = {
   readonly user: SessionV1.User
   readonly sessionID: string
@@ -191,7 +200,7 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
             "x-opencode-session": input.sessionID,
             "x-opencode-request": input.user.id,
             "x-opencode-client": input.flags.client,
-            "User-Agent": USER_AGENT,
+            "User-Agent": GATEWAY_USER_AGENT,
           }
         : {
             "x-session-affinity": input.sessionID,

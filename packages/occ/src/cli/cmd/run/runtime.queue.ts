@@ -4,13 +4,13 @@
 // here. The queue drains one turn at a time; ordinary prompts waiting behind
 // an active ordinary turn are exposed for edit/removal until they begin.
 //
-// The queue also handles /exit, /quit, and /new commands, empty-prompt rejection,
+// The queue also handles /exit, /quit, /new, and /compact commands, empty-prompt rejection,
 // and tracks per-turn wall-clock duration for the footer status line.
 //
 // Resolves when the footer closes and all in-flight work finishes.
 import * as Locale from "@/util/locale"
 import { MessageID, PartID } from "@/session/schema"
-import { isExitCommand, isNewCommand } from "./prompt.shared"
+import { isCompactCommand, isExitCommand, isNewCommand } from "./prompt.shared"
 import type { FooterApi, FooterEvent, FooterQueuedPrompt, RunPrompt } from "./types"
 
 type Trace = {
@@ -29,6 +29,7 @@ export type QueueInput = {
   trace?: Trace
   onSend?: (prompt: RunPrompt) => void
   onNewSession?: () => void | Promise<void>
+  onCompactSession?: () => void | Promise<void>
   run: (prompt: RunPrompt, signal: AbortSignal) => Promise<void>
 }
 
@@ -162,6 +163,57 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
             continue
           }
 
+          if (prompt.mode !== "shell" && isCompactCommand(prompt.text)) {
+            syncQueue()
+            if (!input.onCompactSession) {
+              emit(
+                {
+                  type: "stream.patch",
+                  patch: {
+                    status: "compaction unavailable",
+                  },
+                },
+                {
+                  status: "compaction unavailable",
+                },
+              )
+              continue
+            }
+
+            emit(
+              {
+                type: "stream.patch",
+                patch: {
+                  phase: "running",
+                  status: "compacting conversation",
+                  queue: state.queue.length,
+                },
+              },
+              {
+                phase: "running",
+                status: "compacting conversation",
+                queue: state.queue.length,
+              },
+            )
+            await input.onCompactSession()
+            emit(
+              {
+                type: "stream.patch",
+                patch: {
+                  phase: "idle",
+                  status: "",
+                  queue: state.queue.length,
+                },
+              },
+              {
+                phase: "idle",
+                status: "",
+                queue: state.queue.length,
+              },
+            )
+            continue
+          }
+
           const sent =
             prompt.mode === "shell"
               ? prompt
@@ -282,7 +334,8 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
       !active.command &&
       prompt.mode !== "shell" &&
       !prompt.command &&
-      !isNewCommand(prompt.text)
+      !isNewCommand(prompt.text) &&
+      !isCompactCommand(prompt.text)
     ) {
       const queued: FooterQueuedPrompt = {
         messageID: MessageID.ascending(),
@@ -297,7 +350,7 @@ export async function runPromptQueue(input: QueueInput): Promise<void> {
 
     state.queue.push(prompt)
     syncQueue()
-    if (prompt.mode !== "shell" && isNewCommand(prompt.text)) {
+    if (prompt.mode !== "shell" && (isNewCommand(prompt.text) || isCompactCommand(prompt.text))) {
       drain()
       return
     }

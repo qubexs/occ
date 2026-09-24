@@ -52,6 +52,10 @@ export function isNewCommand(input: string): boolean {
   return input.trim().toLowerCase() === "/new"
 }
 
+export function isCompactCommand(input: string): boolean {
+  return input.trim().toLowerCase() === "/compact"
+}
+
 export function isModelCommand(input: string): boolean {
   const t = input.trim().toLowerCase()
   return t === "/model" || t === "/models" || t.startsWith("/model ") || t.startsWith("/models ")

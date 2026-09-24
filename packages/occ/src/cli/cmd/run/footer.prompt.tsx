@@ -20,6 +20,7 @@ import {
   isExitCommand,
   mentionTriggerIndex,
   isNewCommand,
+  isCompactCommand,
   isModelCommand,
   movePromptHistory,
   pushPromptHistory,
@@ -71,6 +72,7 @@ type PromptInput = {
   history?: RunPrompt[]
   onSubmit: (input: RunPrompt) => boolean | Promise<boolean>
   onCycle: () => void
+  onAgentCycle?: (dir: -1 | 1) => void
   onInterrupt: () => boolean
   onEditorOpen: (input: { value: string }) => Promise<string | undefined>
   onInputClear: () => void
@@ -418,6 +420,7 @@ export function createPromptState(input: PromptInput): PromptState {
         description: "compose in your external editor",
       } satisfies SlashOption,
       { kind: "slash", name: "new", display: "/new", description: "start a new session" } satisfies SlashOption,
+      { kind: "slash", name: "compact", display: "/compact", description: "compact conversation into a summary" } satisfies SlashOption,
       { kind: "slash", name: "exit", display: "/exit", description: "close Occ" } satisfies SlashOption,
       { kind: "slash", name: "model", display: "/model", description: "select model to use" } satisfies SlashOption,
     ]
@@ -875,7 +878,7 @@ export function createPromptState(input: PromptInput): PromptState {
 
       const cursor = area.cursorOffset
       const head = slashHead(area.plainText)
-      const local = !shell() && (next.name === "new" || next.name === "exit" || next.name === "model" || next.name === "models")
+      const local = !shell() && (next.name === "new" || next.name === "compact" || next.name === "exit" || next.name === "model" || next.name === "models")
       const separator = !shell() && !local && head && /\s/.test(area.plainText[head.end] ?? "") ? "" : " "
       const text = `/${next.name}${separator}`
 
@@ -1172,6 +1175,13 @@ export function createPromptState(input: PromptInput): PromptState {
     if (input.state().phase === "idle" && event.name.toLowerCase() === "escape") {
       input.onInputClear()
     }
+    // The textarea consumes Tab before keymap bindings run, so cycle the
+    // primary agent here. When autocomplete is open, leave Tab alone so it
+    // completes the highlighted item instead.
+    if (event.name === "tab" && !visible() && !shell()) {
+      event.preventDefault()
+      input.onAgentCycle?.(event.shift ? -1 : 1)
+    }
   }
 
   const submitPrompt = (next: RunPrompt) => {
@@ -1210,7 +1220,7 @@ export function createPromptState(input: PromptInput): PromptState {
     }
 
     const parsed =
-      command || next.mode === "shell" || isNewCommand(next.text)
+      command || next.mode === "shell" || isNewCommand(next.text) || isCompactCommand(next.text)
         ? undefined
         : parseSlashCommand(next.text, input.commands())
     if (parsed?.type === "pending") {

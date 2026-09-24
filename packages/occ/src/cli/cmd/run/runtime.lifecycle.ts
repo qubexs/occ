@@ -72,6 +72,7 @@ export type LifecycleInput = {
   onCycleVariant?: () => CycleResult | void
   onModelSelect?: (model: NonNullable<RunInput["model"]>) => CycleResult | void | Promise<CycleResult | void>
   onVariantSelect?: (variant: string | undefined) => CycleResult | void | Promise<CycleResult | void>
+  onAgentSelect?: (agent: string) => void | Promise<void>
   onInterrupt?: () => void
   onBackground?: () => void
   onSubagentSelect?: (sessionID: string | undefined) => void
@@ -252,6 +253,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
       onCycleVariant: input.onCycleVariant,
       onModelSelect: input.onModelSelect,
       onVariantSelect: input.onVariantSelect,
+      onAgentSelect: input.onAgentSelect,
       onInterrupt: input.onInterrupt,
       onBackground: input.onBackground,
       onEditorOpen: async ({ value }) => {
@@ -333,6 +335,7 @@ export async function createRuntimeLifecycle(input: LifecycleInput): Promise<Lif
                 session_id: sessionID,
               }),
               theme: footer.currentTheme().splash,
+              detail: directoryLabel(input.directory),
             }),
           )
           await renderer.idle().catch(() => {})
