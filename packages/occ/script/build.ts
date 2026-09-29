@@ -277,9 +277,13 @@ if (Script.release) {
   const tag = `v${Script.version.replace(/^v/, "")}`
   // --repo defaults to the current checkout (CI); GH_REPO overrides it.
   const repo = process.env.GH_REPO?.trim()
+  // Track exact artifacts per target: sharded CI jobs only produce one
+  // archive kind, and bun $ fails on unmatched globs.
+  const artifacts: string[] = []
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
       await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist_new8/${key}/bin`)
+      artifacts.push(`./dist_new8/${key}.tar.gz`)
     } else if (process.platform === "win32") {
       // PowerShell ships on every Windows runner; bsdtar's -a flag proved
       // unreliable here (emitted a tar stream under a .zip name).
@@ -288,14 +292,18 @@ if (Script.release) {
       )
       // Sanity: a real zip must list (validates the central directory).
       await $`tar -tf ../../${key}.zip`.cwd(`dist_new8/${key}/bin`)
+      artifacts.push(`./dist_new8/${key}.zip`)
     } else {
       await $`zip -r ../../${key}.zip *`.cwd(`dist_new8/${key}/bin`)
+      artifacts.push(`./dist_new8/${key}.zip`)
     }
   }
-  if (repo) {
-    await $`gh release upload ${tag} ./dist_new8/*.zip ./dist_new8/*.tar.gz --clobber --repo ${repo}`
-  } else {
-    await $`gh release upload ${tag} ./dist_new8/*.zip ./dist_new8/*.tar.gz --clobber`
+  for (const file of artifacts) {
+    if (repo) {
+      await $`gh release upload ${tag} ${file} --clobber --repo ${repo}`
+    } else {
+      await $`gh release upload ${tag} ${file} --clobber`
+    }
   }
 }
 
