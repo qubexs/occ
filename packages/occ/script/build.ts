@@ -287,11 +287,11 @@ if (Script.release) {
     } else if (process.platform === "win32") {
       // PowerShell ships on every Windows runner; bsdtar's -a flag proved
       // unreliable here (emitted a tar stream under a .zip name).
+      // (No tar -tf sanity check: the tar on PATH may be GNU tar, which
+      // cannot read zips. Compress-Archive throws on failure by itself.)
       await $`powershell -NoProfile -NonInteractive -Command "Compress-Archive -Force -Path * -DestinationPath ../../${key}.zip"`.cwd(
         `dist_new8/${key}/bin`,
       )
-      // Sanity: a real zip must list (validates the central directory).
-      await $`tar -tf ../../${key}.zip`.cwd(`dist_new8/${key}/bin`)
       artifacts.push(`./dist_new8/${key}.zip`)
     } else {
       await $`zip -r ../../${key}.zip *`.cwd(`dist_new8/${key}/bin`)
