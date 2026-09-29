@@ -281,9 +281,13 @@ if (Script.release) {
     if (key.includes("linux")) {
       await $`tar -czf ../../${key}.tar.gz *`.cwd(`dist_new8/${key}/bin`)
     } else if (process.platform === "win32") {
-      // No zip.exe on Windows runners; bsdtar ships with Windows and
-      // picks the archive format from the extension with -a.
-      await $`tar -a -cf ../../${key}.zip *`.cwd(`dist_new8/${key}/bin`)
+      // PowerShell ships on every Windows runner; bsdtar's -a flag proved
+      // unreliable here (emitted a tar stream under a .zip name).
+      await $`powershell -NoProfile -NonInteractive -Command "Compress-Archive -Force -Path * -DestinationPath ../../${key}.zip"`.cwd(
+        `dist_new8/${key}/bin`,
+      )
+      // Sanity: a real zip must list (validates the central directory).
+      await $`tar -tf ../../${key}.zip`.cwd(`dist_new8/${key}/bin`)
     } else {
       await $`zip -r ../../${key}.zip *`.cwd(`dist_new8/${key}/bin`)
     }
