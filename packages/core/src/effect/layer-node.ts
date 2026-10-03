@@ -182,6 +182,10 @@ function walk<Result>(
   const stack: AnyNode[] = []
 
   const recur = (node: AnyNode): Result => {
+    if (node === undefined) {
+      const trail = stack.map((item) => item.name).join(" -> ")
+      throw new Error(`Undefined layer node in layer tree (circular import?) after ${trail}`)
+    }
     const target = options.resolve?.(node) ?? node
     const cached = cache.get(target)
     if (cached !== undefined || cache.has(target)) return cached!
@@ -290,6 +294,10 @@ function rewriteReplacementDependencies(root: AnyNode, replacements: ReadonlyMap
   const stack: AnyNode[] = []
 
   const recur = (node: AnyNode, isRoot = false): AnyNode => {
+    if (node === undefined) {
+      const trail = stack.map((item) => item.name).join(" -> ")
+      throw new Error(`Undefined layer node in layer tree (circular import?) after ${trail}`)
+    }
     const target = isRoot ? node : (replacements.get(node.name) ?? node)
     const cached = cache.get(target)
     if (cached !== undefined || cache.has(target)) return cached!

@@ -76,10 +76,19 @@ const cli = yargs(args)
     type: "boolean",
   })
   .middleware(async (opts) => {
-    if (opts.printLogs) process.env.OCC_PRINT_LOGS = "1"
-    if (opts.logLevel) process.env.OCC_LOG_LEVEL = opts.logLevel
+    // Runtime flags and logging read the OPENCODE_* names; also set the
+    // legacy OCC_* names for backward compatibility.
+    if (opts.printLogs) {
+      process.env.OCC_PRINT_LOGS = "1"
+      process.env.OPENCODE_PRINT_LOGS = "1"
+    }
+    if (opts.logLevel) {
+      process.env.OCC_LOG_LEVEL = opts.logLevel
+      process.env.OPENCODE_LOG_LEVEL = opts.logLevel
+    }
     if (opts.pure) {
       process.env.OCC_PURE = "1"
+      process.env.OPENCODE_PURE = "1"
     }
 
     Heap.start()
