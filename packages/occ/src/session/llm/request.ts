@@ -14,17 +14,23 @@ import { Effect, Record } from "effect"
 import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
+import semver from "semver"
 
 const USER_AGENT = `opencode/${InstallationVersion}`
 
-// The opencode gateway free tier rejects clients below 1.18.0
-// ("OpenCode 1.18.0 or newer is required to use the free tier").
-// occ versions independently (0.x), so gateway-bound requests advertise
-// this protocol-compatibility floor instead of the fork version.
-// Bump only if the gateway raises its minimum. Users can still override
-// the header via provider/model options (merged below).
-const GATEWAY_COMPAT_VERSION = "1.18.0"
-const GATEWAY_USER_AGENT = `opencode/${GATEWAY_COMPAT_VERSION}`
+// The upstream opencode release this fork adapts. occ does not invent its own
+// gateway version: release builds are tagged with the upstream version, so
+// InstallationVersion already is "their version" and is reported as-is.
+// Dev and preview builds are stamped `0.0.0-*` or `local`, which the gateway
+// would reject, so they report the adapted version instead. Keep this in sync
+// when rebasing onto a newer upstream release. Users can still override the
+// header via provider/model options (merged below).
+export const ADAPTED_OPENCODE_VERSION = "2.1.4"
+
+export const gatewayVersion = (version: string): string =>
+  semver.valid(version) && semver.gte(version, ADAPTED_OPENCODE_VERSION) ? version : ADAPTED_OPENCODE_VERSION
+
+const GATEWAY_USER_AGENT = `opencode/${gatewayVersion(InstallationVersion)}`
 
 type PrepareInput = {
   readonly user: SessionV1.User

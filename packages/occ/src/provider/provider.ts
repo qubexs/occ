@@ -9,6 +9,10 @@ import { Npm } from "@opencode-ai/core/npm"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Plugin } from "../plugin"
 import { LLMKeyPool } from "@/session/llm/key-pool"
+import { LLMKeyRefresh } from "@/session/llm/key-refresh"
+import { ConfigPaths } from "@/config/paths"
+import { ProviderCredential } from "./credential"
+import { Flag } from "@opencode-ai/core/flag/flag"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { type LanguageModelV3 } from "@ai-sdk/provider"
 import { ModelsDev } from "@opencode-ai/core/models-dev"
@@ -34,6 +38,10 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 300_000
+
+// Files that can seed the opencode credential. Fingerprinted by the key reload
+// watcher; `config.json` is the legacy global name.
+const CONFIG_FILE_NAMES = ["occ.json", "occ.jsonc", "opencode.json", "opencode.jsonc", "config.json"] as const
 
 function wrapSSE(res: Response, ms: number, ctl: AbortController) {
   if (typeof ms !== "number" || ms <= 0) return res
@@ -186,21 +194,17 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
     opencode: Effect.fnUntraced(function* (input: Info) {
       const env = yield* dep.env()
       const cfg = yield* dep.config()
-      const hasKey = iife(() => {
-        if (input.env.some((item) => env[item])) return true
-        return false
-      })
-      const authed = Boolean(yield* dep.auth(input.id))
       const configKeyRaw = cfg.provider?.["opencode"]?.options?.apiKey
       const configKeys = LLMKeyPool.normalize(configKeyRaw)
+      const credential = ProviderCredential.resolve({
+        configKeys,
+        auth: yield* dep.auth(input.id),
+        envKey: ProviderCredential.envKeyOf(input.env, env),
+      })
 
-      if (configKeys) LLMKeyPool.register(input.id, configKeys)
-      else if (authed) LLMKeyPool.register(input.id, ["oauth-managed"])
-      else LLMKeyPool.register(input.id, ["public"])
+      LLMKeyPool.register(input.id, credential.keys)
 
-      const ok = hasKey || authed || Boolean(configKeys)
-
-      if (!ok) {
+      if (!credential.ok) {
         for (const [key, value] of Object.entries(input.models)) {
           if (value.cost.input === 0) continue
           delete input.models[key]
@@ -209,7 +213,7 @@ function custom(dep: CustomDep): Record<string, CustomLoader> {
 
       return {
         autoload: Object.keys(input.models).length > 0,
-        options: ok ? { apiKey: configKeys?.[0] ?? "" } : { apiKey: "public" },
+        options: { apiKey: credential.apiKey },
       }
     }),
     openai: () =>
@@ -1400,7 +1404,7 @@ const layer = Layer.effect(
     const modelsDevSvc = yield* ModelsDev.Service
     const runtimeFlags = yield* RuntimeFlags.Service
 
-    const state = yield* InstanceState.make<State>(() =>
+    const state = yield* InstanceState.make<State>((ctx) =>
       Effect.gen(function* () {
         const bridge = yield* EffectBridge.make()
         const cfg = yield* config.get()
@@ -1719,6 +1723,58 @@ const layer = Layer.effect(
             delete providers[providerID]
             continue
           }
+        }
+
+        // Hot reload of the opencode credential sources. The key ring is seeded
+        // once while the provider state is built, so a rotated credential would
+        // otherwise keep the old bearer until the instance is disposed. The
+        // fingerprint makes the timer cheap: nothing reloads unless a source
+        // file actually changed.
+        const opencodeID = ProviderV2.ID.make("opencode")
+        if (providers[opencodeID]) {
+          const watched = new Set<string>([path.join(Global.Path.data, "auth.json")])
+          for (const dir of yield* config.directories()) {
+            for (const name of CONFIG_FILE_NAMES) watched.add(path.join(dir, name))
+          }
+          for (const file of [
+            ...(yield* ConfigPaths.files("occ", ctx.directory, ctx.worktree).pipe(
+              Effect.provideService(FSUtil.Service, fs),
+              Effect.orDie,
+            )),
+            ...(yield* ConfigPaths.files("opencode", ctx.directory, ctx.worktree).pipe(
+              Effect.provideService(FSUtil.Service, fs),
+              Effect.orDie,
+            )),
+          ]) {
+            watched.add(file)
+          }
+          if (Flag.OPENCODE_CONFIG) watched.add(Flag.OPENCODE_CONFIG)
+
+          const envNames = providers[opencodeID]?.env ?? []
+
+          yield* LLMKeyRefresh.watch({
+            providerID: "opencode",
+            intervalMs: LLMKeyRefresh.intervalFromEnv(process.env.OPENCODE_KEY_REFRESH_MS),
+            files: () => [...watched],
+            reload: () => config.reload(),
+            resolve: () =>
+              Effect.gen(function* () {
+                const next = yield* config.get()
+                const entry = yield* auth.get("opencode").pipe(Effect.orDie)
+                return ProviderCredential.resolve({
+                  configKeys: LLMKeyPool.normalize(next.provider?.["opencode"]?.options?.apiKey),
+                  auth: entry,
+                  envKey: ProviderCredential.envKeyOf(envNames, yield* env.all()),
+                }).keys
+              }),
+            onChange: (change) =>
+              Effect.logInfo("key pool reloaded", {
+                providerID: "opencode",
+                "key.added": change.added.length.toString(),
+                "key.removed": change.removed.length.toString(),
+                "key.pool": LLMKeyPool.summary("opencode"),
+              }),
+          }).pipe(Effect.forkScoped)
         }
 
         return {

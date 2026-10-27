@@ -29,9 +29,19 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMKeyPool } from "./llm/key-pool"
+import { LLMRateLimit } from "./llm/rate-limit"
+import { LLMSessionUsage } from "./llm/session-usage"
 import { LLMRequestPrep } from "./llm/request"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
+
+// AI SDK errors wrap the provider error; the HTTP status lives on the inner
+// object. Mirrors the extraction in `run`'s `onError` handler.
+const statusOf = (error: unknown): number | undefined => {
+  const inner = (error as { error?: unknown } | undefined)?.error ?? error
+  const status = (inner as { statusCode?: unknown } | undefined)?.statusCode
+  return typeof status === "number" ? status : undefined
+}
 
 export type StreamInput = {
   user: SessionV1.User
@@ -88,6 +98,7 @@ const live: Layer.Layer<
         providerID: input.model.providerID,
         modelID: input.model.id,
         "session.id": input.sessionID,
+        "session.requests": LLMSessionUsage.begin(input.sessionID),
         small: (input.small ?? false).toString(),
         agent: input.agent.name,
         mode: input.agent.mode,
@@ -276,151 +287,214 @@ const live: Layer.Layer<
       })
 
       // Pick a key from the rotation pool for this provider. The pool rotates
-      // on every call and skips keys currently in cooldown after a 429.
-      const pickedKey = LLMKeyPool.pick(input.model.providerID) ?? null
+      // on every call, skips keys currently in cooldown after a 429, and also
+      // skips keys whose last response already reported an empty quota window.
+      const pickedKey =
+        LLMKeyPool.pick(input.model.providerID, Date.now(), (key) =>
+          LLMRateLimit.exhausted(LLMRateLimit.scope(input.model.providerID, key)),
+        ) ?? null
       const useKeyPool = pickedKey !== null && LLMKeyPool.size(input.model.providerID) > 0
       const currentKey: { value: string | null } = { value: pickedKey }
+      // Quota is attributed to the credential that produced it, so a pool
+      // rotation does not carry the previous key's headroom into the next key.
+      const quota = LLMRateLimit.scope(input.model.providerID, pickedKey)
 
       // Default runtime path: AI SDK owns provider execution and tool dispatch;
       // LLMAISDK.toLLMEvents below normalizes fullStream parts for the processor.
-      return {
-        type: "ai-sdk" as const,
-        result: streamText({
-          onError(error) {
-            const e: any = (error as { error?: unknown }).error ?? error
-            const statusCode = typeof e?.statusCode === "number" ? e.statusCode : undefined
-            const responseHeaders: Record<string, string> | undefined = e?.responseHeaders
-            if (currentKey.value && LLMKeyPool.has(input.model.providerID)) {
-              if (statusCode === 429) {
-                const retryAfterMs = LLMKeyPool.parseRetryAfter(responseHeaders)
-                LLMKeyPool.markRateLimited(input.model.providerID, currentKey.value, retryAfterMs)
-                bridge.fork(
-                  Effect.logWarning("key rate-limited, rotating", {
-                    providerID: input.model.providerID,
-                    "key.pool": LLMKeyPool.summary(input.model.providerID),
-                  }),
-                )
-              } else if (statusCode === 401 || statusCode === 403) {
-                LLMKeyPool.markInvalid(input.model.providerID, currentKey.value)
-                bridge.fork(
-                  Effect.logWarning("key rejected, rotating", {
-                    providerID: input.model.providerID,
-                    statusCode,
-                    "key.pool": LLMKeyPool.summary(input.model.providerID),
-                  }),
-                )
-              }
+      const result = streamText({
+        onError(error) {
+          const e: any = (error as { error?: unknown }).error ?? error
+          const statusCode = typeof e?.statusCode === "number" ? e.statusCode : undefined
+          const responseHeaders: Record<string, string> | undefined = e?.responseHeaders
+          // Quota headers can accompany any status; record before rotating so
+          // the warning below reports headroom from this exact response.
+          LLMRateLimit.record(quota, responseHeaders, { status: statusCode })
+          const rateLimit = LLMRateLimit.format(quota)
+          if (currentKey.value && LLMKeyPool.hasReal(input.model.providerID)) {
+            if (statusCode === 429) {
+              const retryAfterMs = LLMKeyPool.parseRetryAfter(responseHeaders)
+              LLMKeyPool.markRateLimited(input.model.providerID, currentKey.value, retryAfterMs)
+              bridge.fork(
+                Effect.logWarning("key rate-limited, rotating", {
+                  providerID: input.model.providerID,
+                  "key.id": LLMKeyPool.fingerprint(currentKey.value),
+                  "key.pool": LLMKeyPool.summary(input.model.providerID),
+                  ...(rateLimit ? { "rate.limit": rateLimit } : {}),
+                }),
+              )
+            } else if (statusCode === 401 || statusCode === 402 || statusCode === 403) {
+              LLMKeyPool.markInvalid(input.model.providerID, currentKey.value)
+              bridge.fork(
+                Effect.logWarning("key rejected, rotating", {
+                  providerID: input.model.providerID,
+                  "key.id": LLMKeyPool.fingerprint(currentKey.value),
+                  statusCode,
+                  "key.pool": LLMKeyPool.summary(input.model.providerID),
+                }),
+              )
             }
+          } else if (rateLimit && statusCode === 429) {
             bridge.fork(
-              Effect.logError("stream error", {
+              Effect.logWarning("rate limited", {
                 providerID: input.model.providerID,
-                modelID: input.model.id,
-                "session.id": input.sessionID,
-                small: (input.small ?? false).toString(),
-                agent: input.agent.name,
-                mode: input.agent.mode,
-                error,
+                "rate.limit": rateLimit,
               }),
             )
-          },
-          onFinish() {
-            if (currentKey.value && LLMKeyPool.has(input.model.providerID)) {
-              LLMKeyPool.markSuccess(input.model.providerID, currentKey.value)
-            }
-          },
-          // Copilot returns the authoritative billed amount only in provider-specific response fields.
-          includeRawChunks: input.model.providerID.includes("github-copilot"),
-          async experimental_repairToolCall(failed) {
-            const lower = failed.toolCall.toolName.toLowerCase()
-            if (lower !== failed.toolCall.toolName && prepared.tools[lower]) {
-              return {
-                ...failed.toolCall,
-                toolName: lower,
-              }
-            }
+          }
+          bridge.fork(
+            Effect.logError("stream error", {
+              providerID: input.model.providerID,
+              modelID: input.model.id,
+              "session.id": input.sessionID,
+              small: (input.small ?? false).toString(),
+              agent: input.agent.name,
+              mode: input.agent.mode,
+              error,
+            }),
+          )
+        },
+        onFinish() {
+          if (currentKey.value && LLMKeyPool.hasReal(input.model.providerID)) {
+            LLMKeyPool.markSuccess(input.model.providerID, currentKey.value)
+          }
+        },
+        // Copilot returns the authoritative billed amount only in provider-specific response fields.
+        includeRawChunks: input.model.providerID.includes("github-copilot"),
+        async experimental_repairToolCall(failed) {
+          const lower = failed.toolCall.toolName.toLowerCase()
+          if (lower !== failed.toolCall.toolName && prepared.tools[lower]) {
             return {
               ...failed.toolCall,
-              input: JSON.stringify({
-                tool: failed.toolCall.toolName,
-                error: failed.error.message,
-              }),
-              toolName: "invalid",
+              toolName: lower,
             }
-          },
-          temperature: prepared.params.temperature,
-          topP: prepared.params.topP,
-          topK: prepared.params.topK,
-          providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
-          activeTools: Object.keys(prepared.tools).filter((x) => x !== "invalid"),
-          tools: prepared.tools,
-          toolChoice: input.toolChoice,
-          maxOutputTokens: prepared.params.maxOutputTokens,
-          abortSignal: input.abort,
-          headers: prepared.headers,
-          maxRetries: input.retries ?? 0,
-          messages: prepared.messages,
-          model: wrapLanguageModel({
-            model: language,
-            middleware: [
-              {
-                specificationVersion: "v3" as const,
-                async transformParams(args) {
-                  if (args.type === "stream") {
-                    // @ts-expect-error
-                    args.params.prompt = ProviderTransform.message(
-                      args.params.prompt,
-                      input.model,
-                      prepared.messageTransformOptions,
-                    )
-                  }
-                  if (useKeyPool && currentKey.value) {
-                    const headers = (args.params.headers ?? {}) as Record<string, string | undefined>
-                    headers["Authorization"] = `Bearer ${currentKey.value}`
-                    args.params.headers = headers
-                  }
-                  return args.params
-                },
+          }
+          return {
+            ...failed.toolCall,
+            input: JSON.stringify({
+              tool: failed.toolCall.toolName,
+              error: failed.error.message,
+            }),
+            toolName: "invalid",
+          }
+        },
+        temperature: prepared.params.temperature,
+        topP: prepared.params.topP,
+        topK: prepared.params.topK,
+        providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
+        activeTools: Object.keys(prepared.tools).filter((x) => x !== "invalid"),
+        tools: prepared.tools,
+        toolChoice: input.toolChoice,
+        maxOutputTokens: prepared.params.maxOutputTokens,
+        abortSignal: input.abort,
+        headers: prepared.headers,
+        maxRetries: input.retries ?? 0,
+        messages: prepared.messages,
+        model: wrapLanguageModel({
+          model: language,
+          middleware: [
+            {
+              specificationVersion: "v3" as const,
+              async transformParams(args) {
+                if (args.type === "stream") {
+                  // @ts-expect-error
+                  args.params.prompt = ProviderTransform.message(
+                    args.params.prompt,
+                    input.model,
+                    prepared.messageTransformOptions,
+                  )
+                }
+                if (useKeyPool && currentKey.value) {
+                  const headers = (args.params.headers ?? {}) as Record<string, string | undefined>
+                  headers["Authorization"] = `Bearer ${currentKey.value}`
+                  args.params.headers = headers
+                }
+                return args.params
               },
-            ],
-          }),
-          experimental_telemetry: {
-            isEnabled: cfg.experimental?.openTelemetry,
-            functionId: "session.llm",
-            tracer: telemetryTracer,
-            metadata: {
-              userId: cfg.username ?? "unknown",
-              sessionId: input.sessionID,
             },
-          },
+          ],
         }),
+        experimental_telemetry: {
+          isEnabled: cfg.experimental?.openTelemetry,
+          functionId: "session.llm",
+          tracer: telemetryTracer,
+          metadata: {
+            userId: cfg.username ?? "unknown",
+            sessionId: input.sessionID,
+          },
+        },
+      })
+
+      // Quota headers arrive with the response, before the body is consumed.
+      // Record them so the 429 path and debug logs can report real headroom.
+      const response = result.response
+      if (response) {
+        void Promise.resolve(response)
+          .then((value) => {
+            LLMRateLimit.record(quota, value.headers)
+            const formatted = LLMRateLimit.format(quota)
+            if (!formatted) return
+            bridge.fork(
+              LLMRateLimit.low(quota)
+                ? Effect.logWarning("rate limit low", {
+                    providerID: input.model.providerID,
+                    "rate.limit": formatted,
+                  })
+                : Effect.logDebug("rate limit", {
+                    providerID: input.model.providerID,
+                    "rate.limit": formatted,
+                  }),
+            )
+          })
+          .catch(() => {})
       }
+
+      return { type: "ai-sdk" as const, result, key: currentKey.value }
     })
 
-    const stream: Interface["stream"] = (input) =>
-      Stream.scoped(
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const ctrl = yield* Effect.acquireRelease(
-              Effect.sync(() => new AbortController()),
-              (ctrl) => Effect.sync(() => ctrl.abort()),
-            )
+    const stream: Interface["stream"] = (input) => {
+      // A credential failure before the model produced anything is safe to retry
+      // on the next key in the pool. At most one attempt per key, so a turn can
+      // never spin forever.
+      const attempt = (depth: number): Stream.Stream<LLMEvent, unknown> =>
+        Stream.scoped(
+          Stream.unwrap(
+            Effect.gen(function* () {
+              const ctrl = yield* Effect.acquireRelease(
+                Effect.sync(() => new AbortController()),
+                (ctrl) => Effect.sync(() => ctrl.abort()),
+              )
 
-            const result = yield* run({ ...input, abort: ctrl.signal })
+              const result = yield* run({ ...input, abort: ctrl.signal })
 
-            if (result.type === "native") return result.stream
+              if (result.type === "native") return result.stream
 
-            // Adapter seam: both runtimes expose the same LLMEvent stream. Native
-            // already returns one; AI SDK streams are converted here.
-            const state = LLMAISDK.adapterState()
-            return Stream.fromAsyncIterable(result.result.fullStream, (e) =>
-              e instanceof Error ? e : new Error(String(e)),
-            ).pipe(
-              Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
-              Stream.flatMap((events) => Stream.fromIterable(events)),
-            )
-          }),
-        ),
-      )
+              // Adapter seam: both runtimes expose the same LLMEvent stream. Native
+              // already returns one; AI SDK streams are converted here.
+              const state = LLMAISDK.adapterState()
+              let emitted = false
+              return Stream.fromAsyncIterable(result.result.fullStream, (e) =>
+                e instanceof Error ? e : new Error(String(e)),
+              ).pipe(
+                Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
+                Stream.flatMap((events) => Stream.fromIterable(events)),
+                Stream.tap(() => Effect.sync(() => (emitted = true))),
+                // With a rotation pool the next key is ready *now*; waiting out
+                // the provider's retry-after would stall the turn for as long as
+                // the exhausted key asked for while the other keys sit idle.
+                Stream.catchIf(
+                  (error: unknown) =>
+                    !emitted &&
+                    depth < LLMKeyPool.size(input.model.providerID) &&
+                    LLMKeyPool.canFailover(input.model.providerID, result.key, statusOf(error)),
+                  () => attempt(depth + 1),
+                ),
+              )
+            }),
+          ),
+        )
+
+      return attempt(0)
+    }
 
     return Service.of({ stream })
   }),
