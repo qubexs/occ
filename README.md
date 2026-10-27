@@ -28,6 +28,9 @@ else to install. This downloads the latest release into `~\.occ\bin`, adds it to
 irm https://raw.githubusercontent.com/qubexs/occ/main/install.ps1 | iex
 ```
 
+Close any running `occ` before re-installing — Windows keeps the executable
+locked while it is running.
+
 Pin a version by setting `$env:VERSION` first:
 
 ```powershell
