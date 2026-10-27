@@ -20,24 +20,45 @@ This codebase is a TypeScript monorepo that bundles a coding agent...
 
 ## Install
 
+Windows — PowerShell 5.1+ already ships with Windows 10/11, so there is nothing
+else to install. This downloads the latest release into `~\.occ\bin`, adds it to
+`PATH`, and upgrades in place if `occ` is already there:
+
+```powershell
+irm https://raw.githubusercontent.com/qubexs/occ/main/install.ps1 | iex
+```
+
+Pin a version by setting `$env:VERSION` first:
+
+```powershell
+$env:VERSION = "0.2.1"; irm https://raw.githubusercontent.com/qubexs/occ/main/install.ps1 | iex
+```
+
+Linux / macOS:
+
 ```bash
-# from source
+curl -fsSL https://raw.githubusercontent.com/qubexs/occ/main/install | bash
+```
+
+Both installers drop the binary in `~/.occ/bin` and update your `PATH`; re-running
+them upgrades in place.
+
+### From source
+
+Only needed for development — skip this if the installer above worked. The only
+requirement is [Bun](https://bun.sh) 1.3+:
+
+```bash
 git clone https://github.com/qubexs/occ.git
 cd occ
 bun install
 bun run build
-# binary at: packages/occ/dist/occ-<os>-<arch>/bin/occ
-
-# from a release (once published)
-curl -fsSL https://raw.githubusercontent.com/qubexs/occ/main/install | bash
-```
-
-Move the binary somewhere on `PATH` and you're done:
-
-```bash
-mv packages/occ/dist/occ-linux-x64/bin/occ ~/.local/bin/
+# binary at: packages/occ/dist_new8/occ-<os>-<arch>/bin/occ
 occ --version
 ```
+
+`occ` is a single self-contained executable: no Node, Bun, or shared libraries
+are required at runtime.
 
 ## Usage
 
@@ -106,10 +127,14 @@ occ config:
 
 | Event | Action |
 |---|---|
-| Each request | Pick the next ready key (round-robin). |
-| `429 Too Many Requests` | Put the key in cooldown (30s base, ramps to 120s on repeated failures). Skip it until cooldown expires. |
-| `401 Unauthorized` / `403 Forbidden` | Lock the key out for 24 hours — the API key is bad, no point retrying. |
-| `200 OK` | Reset the key's failure counter. |
+| Each request | Pick the next ready key (round-robin), skipping keys whose last response already reported an empty quota window. |
+| `429 Too Many Requests` | Cool the key down (`retry-after`, 30s base, ramps to 120s) and **retry the same request immediately on the next key** — it does not wait out the window. |
+| `401` / `402` / `403` | Park the key for 24 hours, then let it back in — a transient rejection does not remove it for the life of the process. |
+| `200 OK` | Reset the key's failure counter and record the quota headers. |
+
+Quota is tracked per key, never per chat: a 429 on one key cannot make the next
+key look half-empty, and the numbers in the logs always belong to the credential
+that produced them.
 
 The SDK is constructed once and cached; the rotated key is injected per
 request via the `Authorization` header, so there's no per-key SDK overhead.
@@ -222,7 +247,7 @@ bun --cwd packages/occ run typecheck
 
 # build a single binary (no TUI/web assets)
 bun --cwd packages/occ script/build.ts --single --skip-embed-web-ui
-# output: packages/occ/dist/occ-<os>-<arch>/bin/occ
+# output: packages/occ/dist_new8/occ-<os>-<arch>/bin/occ
 
 # run a source build (with hot reload, TUI+web conditions)
 bun --cwd packages/occ run dev
@@ -274,8 +299,9 @@ git push origin v0.1.0
 ## Features
 
 - **Multi-key rotation** — load multiple API keys per provider; the CLI
-  rotates them on every request, skips keys in cooldown, and locks out
-  keys that the provider rejects
+  rotates them on every request, skips keys in cooldown, fails over
+  mid-request instead of waiting out a 429, and parks keys the provider
+  rejects
 - Per-provider key pool with cooldown + invalid-key tracking
 - Masked key fingerprints in the startup banner
 - `occ mini` subcommand for an inline chat box
